@@ -53,8 +53,7 @@ IMAGE_BASE_PROMPT = """\
 ・重要キーワードは丸囲みや吹き出しで強調
 ・背景に薄いパステルグラデーションと生活シーンの要素（デスク・窓・観葉植物など）
 ・40〜50代女性に向けた落ち着いた雰囲気
-・広告感を弱める
-・アクセス情報「新宿区・四ツ谷駅から徒歩4分、新宿駅からも1駅、市ヶ谷や麹町、曙橋からもアクセス抜群」を画像の隅に小さく入れる\
+・広告感を弱める\
 """
 
 
@@ -73,8 +72,31 @@ def find_latest_article() -> Path:
 # ── 画像生成 ──────────────────────────────────────────────
 
 
+def trim_article_text(text: str) -> str:
+    """冒頭定型文と末尾免責文を除いた本文のみを返す"""
+    lines = text.splitlines()
+
+    # 冒頭定型文（「こんにちは」で始まる行）をスキップ
+    start = 0
+    for i, line in enumerate(lines):
+        if line.startswith("こんにちは"):
+            start = i + 1
+            break
+
+    # 末尾免責文（「⚠️ご注意」または区切り線「---」）以降をカット
+    end = len(lines)
+    for i in range(start, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("⚠️") or stripped == "---":
+            end = i
+            break
+
+    return "\n".join(lines[start:end]).strip()
+
+
 def build_image_prompt(article_text: str) -> str:
-    return IMAGE_BASE_PROMPT.format(article_text=article_text)
+    body = trim_article_text(article_text)
+    return IMAGE_BASE_PROMPT.format(article_text=body)
 
 
 def generate_image(prompt: str) -> bytes:
@@ -84,6 +106,7 @@ def generate_image(prompt: str) -> bytes:
         model="gpt-image-1",
         prompt=prompt,
         size=IMAGE_SIZE,
+        quality="high",
         n=1,
     )
     image_data = response.data[0]
@@ -124,7 +147,9 @@ def main():
     print("\n[1/3] 最新記事を読み込み中...")
     article_path = find_latest_article()
     article_text = article_path.read_text(encoding="utf-8")
+    trimmed = trim_article_text(article_text)
     print(f"  対象記事: {article_path.name}")
+    print(f"  本文文字数（定型文・免責文除外後）: {len(trimmed)} 字")
 
     print("\n[2/3] OpenAI gpt-image-1で画像を生成中...")
     image_prompt = build_image_prompt(article_text)
