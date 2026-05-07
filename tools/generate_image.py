@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-最新記事を読み込み、OpenAI gpt-image-1で画像を生成してimages/に保存するスクリプト
+最新記事を読み込み、OpenAI gpt-image-2で画像を生成してimages/に保存するスクリプト
 
 Usage:
     python tools/generate_image.py
@@ -32,7 +32,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 ARTICLES_DIR = PROJECT_ROOT / "articles"
 IMAGES_DIR = PROJECT_ROOT / "images"
 
-# gpt-image-1 がサポートする横長サイズ（1792x1024 は DALL-E 3 専用のため 1536x1024 を使用）
+# gpt-image-2 がサポートする横長サイズ（1792x1024 は DALL-E 3 専用のため 1536x1024 を使用）
 IMAGE_SIZE = "1536x1024"
 
 IMAGE_BASE_PROMPT = """\
@@ -100,10 +100,10 @@ def build_image_prompt(article_text: str) -> str:
 
 
 def generate_image(prompt: str) -> bytes:
-    """OpenAI gpt-image-1で画像を生成してバイナリで返す"""
+    """OpenAI gpt-image-2で画像を生成してバイナリで返す"""
     client = OpenAI(api_key=OPENAI_API_KEY)
     response = client.images.generate(
-        model="gpt-image-1",
+        model="gpt-image-2",
         prompt=prompt,
         size=IMAGE_SIZE,
         quality="high",
@@ -151,7 +151,7 @@ def main():
     print(f"  対象記事: {article_path.name}")
     print(f"  本文文字数（定型文・免責文除外後）: {len(trimmed)} 字")
 
-    print("\n[2/3] OpenAI gpt-image-1で画像を生成中...")
+    print("\n[2/3] OpenAI gpt-image-2で画像を生成中...")
     image_prompt = build_image_prompt(article_text)
     image_bytes = generate_image(image_prompt)
     print(f"  生成完了（{len(image_bytes):,} bytes）")
