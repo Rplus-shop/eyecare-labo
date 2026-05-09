@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+import requests
+
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
@@ -31,6 +33,13 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent.parent
 ARTICLES_DIR = PROJECT_ROOT / "articles"
 IMAGES_DIR = PROJECT_ROOT / "images"
+
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
+NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
+NOTION_API_BASE = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
+
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/tonkatsuphotos-creator/eyecare-labo/main/images"
 
 # gpt-image-1 がサポートする横長サイズ（1792x1024 は DALL-E 3 専用のため 1536x1024 を使用）
 IMAGE_SIZE = "1536x1024"
@@ -125,6 +134,49 @@ def generate_image(prompt: str) -> bytes:
     sys.exit(1)
 
 
+# ── Notion ────────────────────────────────────────────────
+
+
+def _notion_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+
+
+def find_notion_page_by_article(article_path: Path) -> str | None:
+    """生成記事リンクの一致でNotionページIDを返す。見つからなければNone。"""
+    rel_path = str(article_path.relative_to(PROJECT_ROOT))
+    resp = requests.post(
+        f"{NOTION_API_BASE}/databases/{NOTION_DATABASE_ID}/query",
+        headers=_notion_headers(),
+        json={"filter": {"property": "生成記事リンク", "url": {"equals": rel_path}}},
+        timeout=10,
+    )
+    results = resp.json().get("results", [])
+    return results[0]["id"] if results else None
+
+
+def append_image_block_to_page(page_id: str, image_url: str) -> None:
+    """Notionページ末尾に external image ブロックを追記する。"""
+    block = {
+        "object": "block",
+        "type": "image",
+        "image": {"type": "external", "external": {"url": image_url}},
+    }
+    resp = requests.patch(
+        f"{NOTION_API_BASE}/blocks/{page_id}/children",
+        headers=_notion_headers(),
+        json={"children": [block]},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        msg = resp.json().get("message", "不明なエラー")
+        print(f"[エラー] Notionへの画像ブロック追記失敗: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+
 # ── 保存 ──────────────────────────────────────────────────
 
 
@@ -144,21 +196,34 @@ def main():
     print("  画像生成フロー開始")
     print("=" * 40)
 
-    print("\n[1/3] 最新記事を読み込み中...")
+    print("\n[1/4] 最新記事を読み込み中...")
     article_path = find_latest_article()
     article_text = article_path.read_text(encoding="utf-8")
     trimmed = trim_article_text(article_text)
     print(f"  対象記事: {article_path.name}")
     print(f"  本文文字数（定型文・免責文除外後）: {len(trimmed)} 字")
 
-    print("\n[2/3] OpenAI gpt-image-1で画像を生成中...")
+    print("\n[2/4] OpenAI gpt-image-1で画像を生成中...")
     image_prompt = build_image_prompt(article_text)
     image_bytes = generate_image(image_prompt)
     print(f"  生成完了（{len(image_bytes):,} bytes）")
 
-    print("\n[3/3] 画像を保存中...")
+    print("\n[3/4] 画像を保存中...")
     out_path = save_image(article_path, image_bytes)
     print(f"  保存先: {out_path.relative_to(PROJECT_ROOT)}")
+
+    print("\n[4/4] NotionページにGitHub画像URLを追記中...")
+    github_url = f"{GITHUB_RAW_BASE}/{out_path.name}"
+    if not NOTION_TOKEN or not NOTION_DATABASE_ID:
+        print("  [スキップ] NOTION_TOKEN または NOTION_DATABASE_ID が未設定です。")
+    else:
+        page_id = find_notion_page_by_article(article_path)
+        if page_id:
+            append_image_block_to_page(page_id, github_url)
+            print(f"  GitHub URL : {github_url}")
+            print(f"  Notion ID  : {page_id}")
+        else:
+            print(f"  [警告] 対応するNotionページが見つかりませんでした。（記事: {article_path.name}）")
 
     print("\n" + "=" * 40)
     print("  完了")
