@@ -35,8 +35,18 @@ if not DATABASE_ID:
 
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
-# Notion APIは1リクエストあたり最大100ブロックまで
 NOTION_BLOCK_LIMIT = 100
+
+GITHUB_ARTICLE_BASE = "https://github.com/tonkatsuphotos-creator/eyecare-labo/blob/main/articles"
+GITHUB_IMAGE_BASE = "https://raw.githubusercontent.com/tonkatsuphotos-creator/eyecare-labo/main/images"
+
+
+def to_github_article_url(filepath: str) -> str:
+    return f"{GITHUB_ARTICLE_BASE}/{Path(filepath).name}"
+
+
+def to_github_image_url(filepath: str) -> str:
+    return f"{GITHUB_IMAGE_BASE}/{Path(filepath).stem}.png"
 
 
 def build_headers() -> dict:
@@ -144,7 +154,10 @@ def build_payload(title: str, filepath: str, first_blocks: list) -> dict:
                 "select": {"name": "生成済"}
             },
             "生成記事リンク": {
-                "url": filepath
+                "url": to_github_article_url(filepath)
+            },
+            "生成画像リンク": {
+                "url": to_github_image_url(filepath)
             },
         },
     }
