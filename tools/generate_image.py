@@ -179,6 +179,20 @@ def append_image_block_to_page(page_id: str, image_url: str) -> None:
         sys.exit(1)
 
 
+def update_image_url_property(page_id: str, image_url: str) -> None:
+    """Notionページの「生成画像リンク」プロパティに画像URLを登録する。"""
+    resp = requests.patch(
+        f"{NOTION_API_BASE}/pages/{page_id}",
+        headers=_notion_headers(),
+        json={"properties": {"生成画像リンク": {"url": image_url}}},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        msg = resp.json().get("message", "不明なエラー")
+        print(f"[エラー] 生成画像リンクプロパティ更新失敗: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+
 # ── 保存 ──────────────────────────────────────────────────
 
 
@@ -231,6 +245,7 @@ def main():
                 print(f"  [DRY-RUN] 画像URL: {github_url}")
             else:
                 append_image_block_to_page(page_id, github_url)
+                update_image_url_property(page_id, github_url)
                 print(f"  GitHub URL : {github_url}")
                 print(f"  Notion ID  : {page_id}")
         else:
