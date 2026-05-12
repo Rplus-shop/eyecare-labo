@@ -25,7 +25,7 @@ jobs:
           python-version: '3.11'
 
       - name: Python 依存パッケージをインストール
-        run: pip install requests python-dotenv openai
+        run: pip install requests python-dotenv openai anthropic
 
       - name: Node.js をセットアップ（Claude Code CLI 用）
         uses: actions/setup-node@v4
