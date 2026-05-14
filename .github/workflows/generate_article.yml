@@ -3,7 +3,7 @@ name: 記事自動生成
 on:
   schedule:
     # 毎月20日 09:00 JST（= 00:00 UTC）
-    - cron: '0 0 20 * *'
+    - cron: '0 20 19 * *'
   # GitHub Actions画面から手動実行も可能
   workflow_dispatch:
 
