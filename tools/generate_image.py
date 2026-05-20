@@ -114,12 +114,12 @@ def build_image_prompt(article_text: str) -> str:
 
 def generate_image(prompt: str) -> bytes:
     """OpenAI gpt-image-2で画像を生成してバイナリで返す"""
-    client = OpenAI(api_key=OPENAI_API_KEY, timeout=90)
+    client = OpenAI(api_key=OPENAI_API_KEY)
     response = client.images.generate(
         model="gpt-image-2",
         prompt=prompt,
         size=IMAGE_SIZE,
-        quality="medium",
+        quality="high",
         n=1,
     )
     image_data = response.data[0]
