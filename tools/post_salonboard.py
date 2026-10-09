@@ -4,8 +4,11 @@
 
 公開APIが無いため、Playwrightでサロンボードの画面を操作する。
 
-**入力欄の位置（SELECTORS）はまだ空。** サロンボードの画面を人がログインした状態で確かめてから埋める。
-空のまま動かすと、ログインもせずに止まる。
+入力欄の位置（SELECTORS）と上限は、2026-10-09 に実際の画面で確かめたもの。
+画面が変わって欄が見つからなくなったら、写真を残して止まる。
+
+publish_at（datetime）を渡すと予約投稿にする。岸川様は朝9時の予約投稿で出している。
+クーポンの添付はまだ作っていない（選ぶクーポンを決めていただいてから）。
 
 画像認証（CAPTCHA）が出たら、自動で越えずに止める。
 
@@ -23,32 +26,39 @@ from pathlib import Path
 from article_text import Article
 
 LOGIN_URL = "https://salonboard.com/login/"
+BLOG_NEW_URL = "https://salonboard.com/KLP/blog/blog/"
 SHOT_DIR = Path(__file__).parent.parent / "screenshots"
 
-# 画面で確かめてから埋める。None のものが1つでもあれば動かさない
+# 2026-10-09 アイケアLaBo四ツ谷店のサロンボードで、多々良がログインした画面を読んで埋めた。
+# 確認画面（/KLP/blog/blog/confirm）まで進めたが、登録のボタンは押していない。
 SELECTORS: dict[str, str | None] = {
-    "login_id": None,
-    "login_password": None,
-    "login_submit": None,
-    "blog_new_url": None,  # ブログの新規投稿画面のURL
-    "title": None,
-    "category": None,
-    "staff": None,
-    "body": None,
-    "image_input": None,  # <input type="file">
-    "confirm": None,  # 確認画面へ進むボタン
-    "submit": None,  # 投稿を確定するボタン（試行では押さない）
+    "login_id": "input[name=userId]",
+    "login_password": "input[name=password]",
+    "login_submit": "a.common-CNCcommon__primaryBtn",  # 「ログイン」のリンク
+    "staff": "#staffId",  # 投稿者。いまは「Ren」だけ
+    "category": "#blogCategoryCd",  # プライベート／サロンのNEWS／おすすめメニュー／おすすめデザイン／ビューティー
+    "title": "#blogTitle",
+    "body_textarea": "blogContents",  # nicEdit の元の textarea の id。本文は nicEditors 経由で入れる
+    "image_open": "#upload",  # 「画像アップロード」
+    "image_input": "#sendFile",
+    "image_submit": "input.jscImageUploaderModalSubmitButton",  # モーダルの「登録する」
+    "rsv_on": "input[name=rsvTokoFlg][value='1']",  # 予約投稿「設定する」
+    "rsv_date": "#rsvTokoDate",  # 表示は「2026年10月14日（水）」。今日から14日先まで
+    "rsv_time": "#rsvTokoTime",  # 15分刻み
+    "confirm": "#confirm",  # 「確認する」
+    "submit": "#reflect",  # 確認画面の「登録・反映する」（試行では押さない）
 }
 
-TITLE_MAX = int(os.environ.get("SALONBOARD_TITLE_MAX", "0") or 0)  # 画面で上限を確かめて入れる。0は未確認
+# 画面の注記（全角で数える）
+TITLE_MAX = 25
+BODY_MAX = 1000
+LINES_MAX = 80
+IMAGES_MAX = 4
+WEEKDAYS = "月火水木金土日"
 
 
 class SalonBoardError(Exception):
     pass
-
-
-def _missing_selectors() -> list[str]:
-    return [k for k, v in SELECTORS.items() if not v]
 
 
 def _env(name: str) -> str:
@@ -58,13 +68,34 @@ def _env(name: str) -> str:
     return v
 
 
-def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool) -> str:
+def check_limits(article: Article) -> None:
+    """サロンボードの上限を超えるものは、入力する前に止める（黙って切らない）"""
+    problems = []
+    if len(article.title) > TITLE_MAX:
+        problems.append(f"タイトル{len(article.title)}字（上限{TITLE_MAX}字）")
+    if len(article.body) > BODY_MAX:
+        problems.append(f"本文{len(article.body)}字（上限{BODY_MAX}字）")
+    lines = article.body.count("\n")
+    if lines > LINES_MAX:
+        problems.append(f"改行{lines}回（上限{LINES_MAX}回）")
+    if problems:
+        raise SalonBoardError("サロンボードの上限を超えています: " + "、".join(problems))
+
+
+def body_html(text: str) -> str:
+    """プレーンテキストを、改行を <br> にしたHTMLにする"""
+    import html
+
+    return "<br>".join(html.escape(line) for line in text.split("\n"))
+
+
+def rsv_label(d) -> str:
+    return f"{d.year}年{d.month:02d}月{d.day:02d}日（{WEEKDAYS[d.weekday()]}）"
+
+
+def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool, publish_at=None) -> str:
     """投稿して、結果の画面のURLを返す。dry_run では入力して写真を撮り、投稿のボタンは押さない"""
-    missing = _missing_selectors()
-    if missing:
-        raise SalonBoardError("サロンボードの入力欄の位置が未設定です: " + ", ".join(missing))
-    if TITLE_MAX and len(article.title) > TITLE_MAX:
-        raise SalonBoardError(f"タイトルが{len(article.title)}字あり、上限{TITLE_MAX}字を超えています")
+    check_limits(article)
 
     from playwright.sync_api import sync_playwright  # 使うときだけ読み込む
 
@@ -82,16 +113,33 @@ def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool)
             page.click(SELECTORS["login_submit"])
             page.wait_for_load_state("networkidle")
 
-            page.goto(SELECTORS["blog_new_url"])
-            page.fill(SELECTORS["title"], article.title)
-            page.select_option(SELECTORS["category"], label=_env("SALONBOARD_CATEGORY"))
+            if "/login" in page.url:
+                raise SalonBoardError("ログインできませんでした（IDかパスワードを確認してください）")
+
+            page.goto(BLOG_NEW_URL)
             page.select_option(SELECTORS["staff"], label=_env("SALONBOARD_STAFF"))
-            page.fill(SELECTORS["body"], article.body)
+            page.select_option(SELECTORS["category"], label=_env("SALONBOARD_CATEGORY"))
+            page.fill(SELECTORS["title"], article.title)
+            # 本文は nicEdit（リッチテキスト）。画面の欄に直接打たず、エディタのAPIで入れる
+            page.evaluate(
+                "([id, html]) => nicEditors.findEditor(id).setContent(html)",
+                [SELECTORS["body_textarea"], body_html(article.body)],
+            )
             if image_path and image_path.exists():
+                page.click(SELECTORS["image_open"])
                 page.set_input_files(SELECTORS["image_input"], str(image_path))
+                page.click(SELECTORS["image_submit"])
+                page.wait_for_timeout(3000)
+            if publish_at is not None:
+                page.check(SELECTORS["rsv_on"])
+                page.select_option(SELECTORS["rsv_date"], label=rsv_label(publish_at))
+                page.select_option(SELECTORS["rsv_time"], label=publish_at.strftime("%H:%M"))
             page.click(SELECTORS["confirm"])
             page.wait_for_load_state("networkidle")
             page.screenshot(path=str(SHOT_DIR / f"{stem}_confirm.png"), full_page=True)
+            if "/confirm" not in page.url:
+                # 入力に誤りがあると、確認画面へ進まず入力画面のまま赤字が出る
+                raise SalonBoardError(f"確認画面へ進めませんでした。写真: screenshots/{stem}_confirm.png")
 
             if dry_run:
                 print(f"[サロンボード・試行] 確認画面で止めました。写真: screenshots/{stem}_confirm.png")
