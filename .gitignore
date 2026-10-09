@@ -21,3 +21,6 @@ env/
 .idea/
 *.swp
 *.swo
+
+# 自動投稿の画面の写真
+screenshots/
