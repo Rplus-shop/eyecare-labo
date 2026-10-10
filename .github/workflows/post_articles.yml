@@ -47,6 +47,8 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
           GBP_CLIENT_ID: ${{ secrets.GBP_CLIENT_ID }}
           GBP_CLIENT_SECRET: ${{ secrets.GBP_CLIENT_SECRET }}
           GBP_REFRESH_TOKEN: ${{ secrets.GBP_REFRESH_TOKEN }}

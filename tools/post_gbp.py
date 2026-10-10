@@ -9,7 +9,7 @@ Business Profile API（v4 localPosts）を使う。
     GBP_CLIENT_ID / GBP_CLIENT_SECRET   Google CloudのOAuthクライアント
     GBP_REFRESH_TOKEN                    店舗のオーナーか管理者のアカウントで同意して得た更新用トークン
     GBP_ACCOUNT_ID / GBP_LOCATION_ID     数字のID（accounts/{ここ}/locations/{ここ}）
-    GBP_BOOKING_URL                      任意。あれば「予約」ボタンを付ける
+    GBP_BOOKING_URL                      任意。未設定ならアイケアLaBoのSATTOU予約フォームを使う
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ from article_text import Article
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API_BASE = "https://mybusiness.googleapis.com/v4"
 SUMMARY_MAX = 1500  # GBPの最新情報の本文の上限
+# 「予約」ボタンの飛び先。2026-10-11 岸川様指定（アイケアLaBo四ツ谷店のSATTOU予約フォーム）
+DEFAULT_BOOKING_URL = "https://form.sattou.site/brands/97/shops/229/form/yfH30oYtHsUR.html"
 
 
 class GbpError(Exception):
@@ -59,7 +61,7 @@ def build_post(article: Article, image_url: str | None) -> dict:
     post: dict = {"languageCode": "ja", "topicType": "STANDARD", "summary": article.body}
     if image_url:
         post["media"] = [{"mediaFormat": "PHOTO", "sourceUrl": image_url}]
-    booking = os.environ.get("GBP_BOOKING_URL", "").strip()
+    booking = os.environ.get("GBP_BOOKING_URL", "").strip() or DEFAULT_BOOKING_URL
     if booking:
         post["callToAction"] = {"actionType": "BOOK", "url": booking}
     return post
