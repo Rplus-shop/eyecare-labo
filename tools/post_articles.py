@@ -149,7 +149,8 @@ def run_channel(channel: str, live: bool) -> bool:
     if channel == "gbp":
         result = post_to_gbp(article, image_url_of(path), dry_run=not live)
     else:
-        result = post_to_salonboard(article, IMAGES_DIR / f"{path.stem}.png", dry_run=not live)
+        theme = ((page["properties"].get("テーマカテゴリ") or {}).get("select") or {}).get("name", "")
+        result = post_to_salonboard(article, IMAGES_DIR / f"{path.stem}.png", dry_run=not live, theme=theme)
 
     if live:
         mark_posted(page, channel)

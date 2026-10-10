@@ -7,26 +7,32 @@
 入力欄の位置（SELECTORS）と上限は、2026-10-09 に実際の画面で確かめたもの。
 画面が変わって欄が見つからなくなったら、写真を残して止まる。
 
-publish_at（datetime）を渡すと予約投稿にする。岸川様は朝9時の予約投稿で出している。
-クーポンの添付はまだ作っていない（選ぶクーポンを決めていただいてから）。
+出し方は、岸川様が手で出してきた形（2026年9〜10月のブログ一覧）に合わせる。
+- 予約投稿で、水曜と土曜の朝9時。すでに予約が入っている日は使わず、次の空いている日にする
+- カテゴリは「サロンのNEWS」、投稿者は「Ren」
+- クーポンを1つ添える。子ども向けの記事は【お悩み相談】、それ以外は【先着5名様限定】視力改善
 
 画像認証（CAPTCHA）が出たら、自動で越えずに止める。
 
 必要な環境変数（GitHub Secrets）:
     SALONBOARD_LOGIN_ID / SALONBOARD_PASSWORD
-    SALONBOARD_STAFF     ブログの投稿者に選ぶスタッフ名
-    SALONBOARD_CATEGORY  ブログのカテゴリ名
+    SALONBOARD_STAFF     任意。投稿者（既定：Ren）
+    SALONBOARD_CATEGORY  任意。カテゴリ（既定：サロンのNEWS）
 """
 
 from __future__ import annotations
 
 import os
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from article_text import Article
 
 LOGIN_URL = "https://salonboard.com/login/"
 BLOG_NEW_URL = "https://salonboard.com/KLP/blog/blog/"
+BLOG_LIST_URL = "https://salonboard.com/KLP/blog/blogList/"
+JST = timezone(timedelta(hours=9))
 SHOT_DIR = Path(__file__).parent.parent / "screenshots"
 
 # 2026-10-09 アイケアLaBo四ツ谷店のサロンボードで、多々良がログインした画面を読んで埋めた。
@@ -45,6 +51,9 @@ SELECTORS: dict[str, str | None] = {
     "rsv_on": "input[name=rsvTokoFlg][value='1']",  # 予約投稿「設定する」
     "rsv_date": "#rsvTokoDate",  # 表示は「2026年10月14日（水）」。今日から14日先まで
     "rsv_time": "#rsvTokoTime",  # 15分刻み
+    "coupon_open": "a.SB_modal_add_coupon_btn",  # 「クーポン選択」
+    "coupon_item": "div.couponListBox",  # クーポン1件。押すと選ばれる
+    "coupon_set": "a.jsc_SB_modal_setting_btn",  # 「設定する」（選ぶまで押せない）
     "confirm": "#confirm",  # 「確認する」
     "submit": "#reflect",  # 確認画面の「登録・反映する」（試行では押さない）
 }
@@ -55,6 +64,17 @@ BODY_MAX = 1000
 LINES_MAX = 80
 IMAGES_MAX = 4
 WEEKDAYS = "月火水木金土日"
+
+DEFAULT_STAFF = "Ren"
+DEFAULT_CATEGORY = "サロンのNEWS"
+POST_WEEKDAYS = (2, 5)  # 水・土
+POST_TIME = (9, 0)
+RSV_DAYS_AHEAD = 14  # 予約投稿で選べるのは今日から14日先まで
+
+# 先に一致したものを使う。クーポンの名前が変わったら、ここを直す
+KIDS_PATTERN = re.compile(r"子ども|子供|こども|お子")
+COUPONS_KIDS = ["【お悩み相談】"]
+COUPONS_DEFAULT = ["【先着5名様限定】視力改善", "【先着5名様限定】眼精疲労", "【お悩み相談】"]
 
 
 class SalonBoardError(Exception):
@@ -82,6 +102,30 @@ def check_limits(article: Article) -> None:
         raise SalonBoardError("サロンボードの上限を超えています: " + "、".join(problems))
 
 
+def coupon_candidates(article: Article, theme: str = "") -> list[str]:
+    """これまでの傾向：子ども向けは【お悩み相談】、それ以外は【先着5名様限定】"""
+    if theme == "子どもの視力" or KIDS_PATTERN.search(article.title):
+        return COUPONS_KIDS
+    return COUPONS_DEFAULT
+
+
+def next_slot(today: date, taken: set[date]) -> datetime:
+    """水・土の朝9時のうち、まだ予約が入っていない一番近い日（明日以降・14日先まで）"""
+    for n in range(1, RSV_DAYS_AHEAD + 1):
+        d = today + timedelta(days=n)
+        if d.weekday() in POST_WEEKDAYS and d not in taken:
+            return datetime(d.year, d.month, d.day, *POST_TIME, tzinfo=JST)
+    raise SalonBoardError(f"{RSV_DAYS_AHEAD}日先まで、水・土の予約投稿の枠が埋まっています")
+
+
+def taken_dates(list_text: str) -> set[date]:
+    """ブログ一覧の「初回反映日時」から、予約・公開済みの日付を拾う"""
+    out = set()
+    for y, m, d in re.findall(r"(\d{4})/(\d{2})/(\d{2}) \d{2}:\d{2}", list_text):
+        out.add(date(int(y), int(m), int(d)))
+    return out
+
+
 def body_html(text: str) -> str:
     """プレーンテキストを、改行を <br> にしたHTMLにする"""
     import html
@@ -93,7 +137,21 @@ def rsv_label(d) -> str:
     return f"{d.year}年{d.month:02d}月{d.day:02d}日（{WEEKDAYS[d.weekday()]}）"
 
 
-def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool, publish_at=None) -> str:
+def select_coupon(page, candidates: list[str]) -> str:
+    """クーポン選択を開き、候補の順に名前で探して1つ設定する。どれも無ければ止める"""
+    page.click(SELECTORS["coupon_open"])
+    page.wait_for_selector(SELECTORS["coupon_item"], state="visible")
+    for key in candidates:
+        item = page.locator(SELECTORS["coupon_item"], has_text=key).first
+        if item.count():
+            name = item.inner_text().split("有効期限")[0].strip()
+            item.click()
+            page.locator(SELECTORS["coupon_set"]).filter(has_text="設定する").first.click()
+            return name
+    raise SalonBoardError("添えるクーポンが見つかりません（候補: " + "、".join(candidates) + "）")
+
+
+def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool, theme: str = "") -> str:
     """投稿して、結果の画面のURLを返す。dry_run では入力して写真を撮り、投稿のボタンは押さない"""
     check_limits(article)
 
@@ -116,9 +174,13 @@ def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool,
             if "/login" in page.url:
                 raise SalonBoardError("ログインできませんでした（IDかパスワードを確認してください）")
 
+            page.goto(BLOG_LIST_URL)
+            publish_at = next_slot(datetime.now(JST).date(), taken_dates(page.inner_text("body")))
+            print(f"[サロンボード] 予約投稿の日時: {publish_at:%Y-%m-%d %H:%M}")
+
             page.goto(BLOG_NEW_URL)
-            page.select_option(SELECTORS["staff"], label=_env("SALONBOARD_STAFF"))
-            page.select_option(SELECTORS["category"], label=_env("SALONBOARD_CATEGORY"))
+            page.select_option(SELECTORS["staff"], label=os.environ.get("SALONBOARD_STAFF") or DEFAULT_STAFF)
+            page.select_option(SELECTORS["category"], label=os.environ.get("SALONBOARD_CATEGORY") or DEFAULT_CATEGORY)
             page.fill(SELECTORS["title"], article.title)
             # 本文は nicEdit（リッチテキスト）。画面の欄に直接打たず、エディタのAPIで入れる
             page.evaluate(
@@ -130,10 +192,11 @@ def post_to_salonboard(article: Article, image_path: Path | None, dry_run: bool,
                 page.set_input_files(SELECTORS["image_input"], str(image_path))
                 page.click(SELECTORS["image_submit"])
                 page.wait_for_timeout(3000)
-            if publish_at is not None:
-                page.check(SELECTORS["rsv_on"])
-                page.select_option(SELECTORS["rsv_date"], label=rsv_label(publish_at))
-                page.select_option(SELECTORS["rsv_time"], label=publish_at.strftime("%H:%M"))
+            coupon = select_coupon(page, coupon_candidates(article, theme))
+            print(f"[サロンボード] クーポン: {coupon}")
+            page.check(SELECTORS["rsv_on"])
+            page.select_option(SELECTORS["rsv_date"], label=rsv_label(publish_at))
+            page.select_option(SELECTORS["rsv_time"], label=publish_at.strftime("%H:%M"))
             page.click(SELECTORS["confirm"])
             page.wait_for_load_state("networkidle")
             page.screenshot(path=str(SHOT_DIR / f"{stem}_confirm.png"), full_page=True)
