@@ -116,7 +116,7 @@ def image_url_of(path: Path) -> str | None:
     """GBPに渡す画像の公開URL。リポジトリ名は実行中のものを使う（旧名のURLに頼らない）"""
     if not (IMAGES_DIR / f"{path.stem}.png").exists():
         return None
-    repo = os.environ.get("GITHUB_REPOSITORY", "tonkatsuphotos-creator/eyecare-labo-ver1")
+    repo = os.environ.get("GITHUB_REPOSITORY", "Rplus-shop/eyecare-labo")
     return f"https://raw.githubusercontent.com/{repo}/main/images/{path.stem}.png"
 
 
