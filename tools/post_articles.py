@@ -70,7 +70,7 @@ def today_jst() -> date:
     return datetime.now(JST).date()
 
 
-def fetch_next(channel: str) -> dict | None:
+def fetch_candidates(channel: str) -> list[dict]:
     date_prop = CHANNELS[channel]["date_prop"]
     resp = requests.post(
         f"{NOTION_API_BASE}/databases/{DATABASE_ID}/query",
@@ -92,14 +92,13 @@ def fetch_next(channel: str) -> dict | None:
                 {"property": "投稿日", "direction": "ascending"},
                 {"timestamp": "created_time", "direction": "ascending"},
             ],
-            "page_size": 1,
+            "page_size": 20,
         },
         timeout=10,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Notionの検索に失敗しました（{resp.json().get('message', resp.status_code)}）")
-    results = resp.json().get("results", [])
-    return results[0] if results else None
+    return resp.json().get("results", [])
 
 
 def article_path_of(page: dict) -> Path:
@@ -138,12 +137,21 @@ def mark_posted(page: dict, channel: str) -> None:
 
 def run_channel(channel: str, live: bool) -> bool:
     label = CHANNELS[channel]["label"]
-    page = fetch_next(channel)
+    # 記事ファイルが無い・形が崩れているものは飛ばし、読める記事のうち一番古いものを出す
+    # （崩れた記事は、次の記事生成の便でネタストックに戻され、作り直される）
+    page = path = article = None
+    for candidate in fetch_candidates(channel):
+        try:
+            path = article_path_of(candidate)
+            article = load_article(path)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"[{label}] 読めない記事を飛ばします: {e}")
+            continue
+        page = candidate
+        break
     if page is None:
         print(f"[{label}] 出す記事がありません")
         return True
-    path = article_path_of(page)
-    article = load_article(path)
     print(f"[{label}] {article.title}（{len(article.body)}字）")
 
     if channel == "gbp":
