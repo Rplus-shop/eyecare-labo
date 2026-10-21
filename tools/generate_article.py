@@ -17,7 +17,7 @@ import os
 import re
 from urllib.parse import unquote
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import anthropic
@@ -77,13 +77,28 @@ def notion_headers() -> dict:
     }
 
 
+# 記事にするネタの鮮度。これより古いネタストックは使わない（消さずに残す）
+STOCK_FRESH_DAYS = 45
+
+
+def fresh_since(days: int) -> str:
+    return (datetime.now() - timedelta(days=days)).date().isoformat()
+
+
 def fetch_next_stocks(n: int = 10) -> list:
     """ネタストックを並び順の昇順でn件取得する"""
     resp = requests.post(
         f"{NOTION_API_BASE}/databases/{DATABASE_ID}/query",
         headers=notion_headers(),
         json={
-            "filter": {"property": "ステータス", "select": {"equals": "ネタストック"}},
+            "filter": {
+                "and": [
+                    {"property": "ステータス", "select": {"equals": "ネタストック"}},
+                    # ネタは作った月の「当月・翌月」の季節に合わせて作られる（generate_topics.py）。
+                    # 古いネタを使うと季節外れの記事になる（2026-10-21 に7月の梅雨・夏休みのネタが使われた）
+                    {"timestamp": "created_time", "created_time": {"on_or_after": fresh_since(STOCK_FRESH_DAYS)}},
+                ]
+            },
             "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
             "page_size": n,
         },

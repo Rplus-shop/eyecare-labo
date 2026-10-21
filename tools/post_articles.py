@@ -55,6 +55,8 @@ CHANNELS = {
     "hpb": {"label": "ホットペッパー（サロンボード）", "date_prop": "HPB投稿日"},
 }
 STATUS_READY = "生成済"
+# ネタは作った月の「当月・翌月」向け。作成からこの日数を過ぎた記事は投稿しない
+POST_FRESH_DAYS = 60
 STATUS_DONE = "投稿済"
 
 
@@ -80,6 +82,8 @@ def fetch_candidates(channel: str) -> list[dict]:
                 "and": [
                     {"property": "ステータス", "select": {"equals": STATUS_READY}},
                     {"property": date_prop, "date": {"is_empty": True}},
+                    # ネタの作成から POST_FRESH_DAYS を過ぎた記事は、季節外れになるので出さない
+                    {"timestamp": "created_time", "created_time": {"on_or_after": (today_jst() - timedelta(days=POST_FRESH_DAYS)).isoformat()}},
                     {
                         "or": [
                             {"property": "投稿日", "date": {"is_empty": True}},
