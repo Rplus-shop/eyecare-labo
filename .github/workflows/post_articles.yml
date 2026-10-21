@@ -1,0 +1,74 @@
+name: 記事の自動投稿
+
+on:
+  # 本番の切り替えまでは手動実行だけ。切り替えたら下の schedule を有効にする
+  # schedule:
+  #   - cron: '0 1 * * *'  # 毎日 10:00 JST
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: '投稿先（all / gbp / hpb）'
+        default: 'all'
+        type: choice
+        options: [all, gbp, hpb]
+      live:
+        description: '本番の投稿をする（外すと投稿の直前で止める）'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-articles
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install requests python-dotenv playwright
+          python -m playwright install --with-deps chromium
+
+      - name: 投稿する
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          GBP_CLIENT_ID: ${{ secrets.GBP_CLIENT_ID }}
+          GBP_CLIENT_SECRET: ${{ secrets.GBP_CLIENT_SECRET }}
+          GBP_REFRESH_TOKEN: ${{ secrets.GBP_REFRESH_TOKEN }}
+          GBP_ACCOUNT_ID: ${{ secrets.GBP_ACCOUNT_ID }}
+          GBP_LOCATION_ID: ${{ secrets.GBP_LOCATION_ID }}
+          GBP_BOOKING_URL: ${{ secrets.GBP_BOOKING_URL }}
+          SALONBOARD_LOGIN_ID: ${{ secrets.SALONBOARD_LOGIN_ID }}
+          SALONBOARD_PASSWORD: ${{ secrets.SALONBOARD_PASSWORD }}
+          SALONBOARD_STAFF: ${{ secrets.SALONBOARD_STAFF }}
+          SALONBOARD_CATEGORY: ${{ secrets.SALONBOARD_CATEGORY }}
+        run: |
+          ARGS="--channel ${{ inputs.channel || 'all' }}"
+          if [ "${{ inputs.live }}" = "true" ]; then ARGS="$ARGS --live"; fi
+          python tools/post_articles.py $ARGS
+
+      - name: 画面の写真を残す
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
