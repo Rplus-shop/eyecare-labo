@@ -15,6 +15,7 @@ Usage:
 
 import os
 import re
+from urllib.parse import unquote
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -283,6 +284,52 @@ def clean_output(text: str) -> str:
     return text.strip()
 
 
+START_MARKER = "こんにちは！新宿区"
+END_MARKER = "専門家や医師の診断を受けてください。"
+
+
+def is_valid_article(text: str) -> bool:
+    """冒頭定型文で始まり、末尾免責文で終わり、本文がある程度の長さあるか"""
+    return text.startswith(START_MARKER) and text.endswith(END_MARKER) and len(text) >= 300
+
+
+def requeue_broken() -> int:
+    """「生成済」なのに記事ファイルの形が崩れているもの（冒頭定型文が無い）を「ネタストック」に戻す。
+    戻したものは、この便で作り直される。2026-10-21 に本文の抜けた記事が1本できたため"""
+    resp = requests.post(
+        f"{NOTION_API_BASE}/databases/{DATABASE_ID}/query",
+        headers=notion_headers(),
+        json={"filter": {"property": "ステータス", "select": {"equals": "生成済"}}, "page_size": 100},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        print(f"[注意] 生成済の一覧を取れませんでした: {resp.json().get('message', resp.status_code)}")
+        return 0
+    count = 0
+    for page in resp.json().get("results", []):
+        url = (page["properties"].get("生成記事リンク") or {}).get("url") or ""
+        name = unquote(url.rsplit("/", 1)[-1]) if url else ""
+        path = PROJECT_ROOT / "articles" / name
+        if not name or not path.exists():
+            continue
+        if START_MARKER in path.read_text(encoding="utf-8"):
+            continue
+        r = requests.patch(
+            f"{NOTION_API_BASE}/pages/{page['id']}",
+            headers=notion_headers(),
+            json={"properties": {"ステータス": {"select": {"name": "ネタストック"}}}},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            count += 1
+            # 崩れた本文から作った画像も消し、作り直した記事で画像を作り直させる
+            image = PROJECT_ROOT / "images" / f"{path.stem}.png"
+            if image.exists():
+                image.unlink()
+            print(f"  作り直しに回しました: {name}")
+    return count
+
+
 # ── ファイル保存 ──────────────────────────────────────────
 
 
@@ -306,7 +353,11 @@ def main():
 
     # Step 1: Notionからネタストックを10件取得
     print("\n[1/5] Notionからネタストックを10件取得中...")
+    requeued = requeue_broken()
+    if requeued:
+        print(f"  形の崩れた記事 {requeued}本 をネタストックに戻しました")
     pages = fetch_next_stocks(10)
+    skipped: list[str] = []
     print(f"  取得件数: {len(pages)}件")
 
     # CLAUDE.md・referencesは記事間で不変のため、ループの外で1回だけ構築（キャッシュ再利用のため）
@@ -324,7 +375,13 @@ def main():
         # Step 2: Claude APIで記事生成
         print(f"\n  [2/5] Claude APIで記事を生成中...")
         raw_output = generate_article_with_claude(system_blocks, meta)
-        article_content = clean_output(raw_output) + "\n\n" + ARTICLE_FOOTER
+        cleaned = clean_output(raw_output)
+        if not is_valid_article(cleaned):
+            # 保存もNotionの更新もしない。ネタストックのまま残り、次の便で作り直す
+            print(f"  [注意] 記事の形が崩れていたので保存しません（出力 {len(raw_output)}字）")
+            skipped.append(meta["title"])
+            continue
+        article_content = cleaned + "\n\n" + ARTICLE_FOOTER
         print(f"  生成文字数 : {len(article_content)}字")
 
         # Step 3: Markdownファイルに保存
@@ -344,7 +401,9 @@ def main():
         print(f"  完了: {filepath}")
 
     print("\n" + "=" * 40)
-    print(f"  全件完了（{len(pages)}本）")
+    print(f"  全件完了（{len(pages) - len(skipped)}本）")
+    if skipped:
+        print(f"  形が崩れて保存しなかった記事（次の便で作り直し）: {', '.join(skipped)}")
     print("=" * 40)
 
 
