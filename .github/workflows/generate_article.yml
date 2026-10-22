@@ -4,8 +4,6 @@ on:
   schedule:
     # 毎月20日 05:00 JST（= 19日 20:00 UTC）
     - cron: '0 20 19 * *'
-    # 【テスト・一時】2026-10-22 05:00 JST に1回だけ動かす。確かめたら、この2行を消す
-    - cron: '0 20 21 10 *'
   # GitHub Actions画面から手動実行も可能
   workflow_dispatch:
 

@@ -266,7 +266,9 @@ def generate_article_with_claude(system_blocks: list, meta: dict) -> str:
 """
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=4096,
+        # claude-sonnet-5 は既定で考えてから書く。4096 だと考える部分で使い切り、本文が0字になることがあった
+        # （2026-10-22 の便で10本中3本）。SDK の目安どおり 16000 にする
+        max_tokens=16000,
         system=system_blocks,
         messages=[{"role": "user", "content": user_prompt}],
     )
@@ -275,7 +277,9 @@ def generate_article_with_claude(system_blocks: list, meta: dict) -> str:
     cache_write = getattr(usage, "cache_creation_input_tokens", 0)
     print(f"  [トークン] input={usage.input_tokens} "
           f"cache_read={cache_read} cache_write={cache_write} "
-          f"output={usage.output_tokens}")
+          f"output={usage.output_tokens} stop_reason={response.stop_reason}")
+    if response.stop_reason == "max_tokens":
+        print("  [注意] 出力の上限で打ち切られました")
 
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
