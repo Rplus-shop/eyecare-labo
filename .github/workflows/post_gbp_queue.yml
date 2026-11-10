@@ -1,0 +1,68 @@
+name: GBPへ確認済みの投稿を出す
+
+# gbp-queue ブランチに置いた、人が確かめた投稿案だけを出す。
+# 自動生成の記事をそのまま出す経路（post_articles.yml の gbp）は使わない。
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 毎日 9:00 JST。その日付の案があるときだけ投稿する
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '出す日（YYYY-MM-DD）。空なら今日'
+        default: ''
+        type: string
+      live:
+        description: '本番の投稿をする（外すと投稿の直前で止める）'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-gbp-queue
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 投稿案を取り出す
+        uses: actions/checkout@v4
+        with:
+          ref: gbp-queue
+          path: queue
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
+      - name: 投稿する
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          GBP_CLIENT_ID: ${{ secrets.GBP_CLIENT_ID }}
+          GBP_CLIENT_SECRET: ${{ secrets.GBP_CLIENT_SECRET }}
+          GBP_REFRESH_TOKEN: ${{ secrets.GBP_REFRESH_TOKEN }}
+          GBP_ACCOUNT_ID: ${{ secrets.GBP_ACCOUNT_ID }}
+          GBP_LOCATION_ID: ${{ secrets.GBP_LOCATION_ID }}
+          GBP_BOOKING_URL: ${{ secrets.GBP_BOOKING_URL }}
+          IN_DATE: ${{ inputs.date }}
+          IN_LIVE: ${{ inputs.live }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          ARGS=(--queue queue)
+          if [ -n "$IN_DATE" ]; then ARGS+=(--date "$IN_DATE"); fi
+          # 定期実行は本番。手動のときは live を付けたときだけ本番
+          if [ "$EVENT" = "schedule" ] || [ "$IN_LIVE" = "true" ]; then ARGS+=(--live); fi
+          python tools/post_gbp_queue.py "${ARGS[@]}"

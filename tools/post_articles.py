@@ -141,6 +141,11 @@ def mark_posted(page: dict, channel: str) -> None:
 
 def run_channel(channel: str, live: bool) -> bool:
     label = CHANNELS[channel]["label"]
+    if channel == "gbp":
+        # 生成した記事には効果をうたう言い方が入るため、GBPへはそのまま出さない。
+        # 人が確かめた投稿案は post_gbp_queue.py（gbp-queue ブランチ）から出す
+        print(f"[{label}] ここからは出しません。確認済みの投稿案は post_gbp_queue.yml が出します")
+        return True
     # 記事ファイルが無い・形が崩れているものは飛ばし、読める記事のうち一番古いものを出す
     # （崩れた記事は、次の記事生成の便でネタストックに戻され、作り直される）
     page = path = article = None
